@@ -171,4 +171,8 @@
  - Avoid refactoring core components (`CSVEditor`, `AddRowForm`, `CSVContext`) unless strictly necessary.
  - When adding new rules or fields, keep validation messages clear and user-focused.
  - Follow existing UI patterns under `src/app/components/ui` for any new visual elements.
-  
+
+ ### Phase 2 | Bulk Upload
+
+ - Currently Folder Upload is in Design and will be integrating it shortly
+ - Includes - Automatic Offer Addition to corresponding CSVs
