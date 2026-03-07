@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { ArrowLeft, Save, Sparkles, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Save, Sparkles, AlertCircle, Info } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { Label } from '../components/ui/label';
@@ -188,6 +188,20 @@ export default function AddRowForm() {
         if (!endDateValue || endDateValue.trim() === '') {
           errors.push('When pyIsPropositionActive is "Date", EndDate is required.');
         }
+      }
+    }
+
+    // StartDate/EndDate mutual requirement: both must be provided together (before saving).
+    if (startDateIndex !== -1 && endDateIndex !== -1) {
+      const startDateValue = currentValues['StartDate'] || '';
+      const endDateValue = currentValues['EndDate'] || '';
+      const hasStart = startDateValue.trim() !== '';
+      const hasEnd = endDateValue.trim() !== '';
+      if (hasStart && !hasEnd) {
+        errors.push('When StartDate is provided, EndDate must also be provided.');
+      }
+      if (hasEnd && !hasStart) {
+        errors.push('When EndDate is provided, StartDate must also be provided.');
       }
     }
 
@@ -463,6 +477,18 @@ export default function AddRowForm() {
       return normalizeDateString(value);
     });
 
+    // When both StartDate and EndDate are provided, set pyIsPropositionActive to "Date" in the saved row.
+    const pyIsPropositionActiveIndex = csvData.headers.findIndex(h => h === 'pyIsPropositionActive');
+    const startDateIndex = csvData.headers.findIndex(h => h === 'StartDate');
+    const endDateIndex = csvData.headers.findIndex(h => h === 'EndDate');
+    if (pyIsPropositionActiveIndex !== -1 && startDateIndex !== -1 && endDateIndex !== -1) {
+      const startVal = (newRow[startDateIndex] || '').trim();
+      const endVal = (newRow[endDateIndex] || '').trim();
+      if (startVal !== '' && endVal !== '') {
+        newRow[pyIsPropositionActiveIndex] = 'Date';
+      }
+    }
+
     // Update CSV data with new row
     const updatedData = {
       ...csvData,
@@ -481,6 +507,16 @@ export default function AddRowForm() {
       </div>
     );
   }
+
+  // Compute whether pyIsPropositionActive will be auto-set to "Date" when both dates are provided (for UI notice).
+  const startDateIndex = csvData.headers.findIndex(h => h === 'StartDate');
+  const endDateIndex = csvData.headers.findIndex(h => h === 'EndDate');
+  const pyIsPropositionActiveIndex = csvData.headers.findIndex(h => h === 'pyIsPropositionActive');
+  const startDateField = fieldValues['StartDate'];
+  const endDateField = fieldValues['EndDate'];
+  const resolvedStartDate = startDateField?.mode === 'auto' ? generateAutoValue(startDateIndex) : (startDateField?.value || '');
+  const resolvedEndDate = endDateField?.mode === 'auto' ? generateAutoValue(endDateIndex) : (endDateField?.value || '');
+  const willAutoSetPyIsPropositionActiveToDate = pyIsPropositionActiveIndex !== -1 && startDateIndex !== -1 && endDateIndex !== -1 && resolvedStartDate.trim() !== '' && resolvedEndDate.trim() !== '';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-12 px-4">
@@ -646,6 +682,16 @@ export default function AddRowForm() {
                   <li key={index}>{error}</li>
                 ))}
               </ul>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Info: pyIsPropositionActive will be auto-set to "Date" when both dates are provided */}
+        {willAutoSetPyIsPropositionActiveToDate && (
+          <Alert className="mb-4 border-primary/50 bg-primary/5">
+            <Info className="h-4 w-4 text-primary" />
+            <AlertDescription>
+              <strong>Auto-setting:</strong> Because both StartDate and EndDate are provided, <strong>pyIsPropositionActive</strong> will be automatically set to &quot;Date&quot; when you save.
             </AlertDescription>
           </Alert>
         )}
