@@ -33,6 +33,10 @@ function normalizeDateString(value: string): string {
   
   const trimmed = value.trim();
   if (!trimmed) return value;
+
+  // If the value includes a time component, ignore time and normalize using only the date portion.
+  // Examples: "2026-03-07T10:15:00Z" -> "2026-03-07", "03/07/2026 10:15" -> "03/07/2026"
+  const parseTarget = trimmed.split(/[T\s]/)[0] || trimmed;
   
   // Try to parse various date formats
   const datePatterns = [
@@ -47,7 +51,7 @@ function normalizeDateString(value: string): string {
   ];
   
   for (const pattern of datePatterns) {
-    const match = trimmed.match(pattern);
+    const match = parseTarget.match(pattern);
     if (match) {
       let year, month, day;
       
@@ -82,8 +86,8 @@ function normalizeDateString(value: string): string {
   }
   
   // Try parsing ISO date strings
-  const date = new Date(trimmed);
-  if (!isNaN(date.getTime()) && trimmed.includes('-') || trimmed.includes('/')) {
+  const date = new Date(parseTarget);
+  if (!isNaN(date.getTime()) && (parseTarget.includes('-') || parseTarget.includes('/'))) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
