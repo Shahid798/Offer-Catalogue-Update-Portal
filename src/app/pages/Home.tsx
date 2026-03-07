@@ -176,7 +176,7 @@ export default function Home() {
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <CheckCircle className="w-5 h-5 text-green-600" />
-                  <h3>Uploaded Files ({uploadedFiles.length})</h3>
+                  <h3>Uploaded File(s) ({uploadedFiles.length})</h3>
                 </div>
                 <Button
                   variant="ghost"
@@ -218,7 +218,7 @@ export default function Home() {
           {/* Submit button */}
           {uploadedFiles.length > 0 && (
             <Button className="w-full" size="lg" onClick={handleUpdateData}>
-              Update Decision Data
+              Proceed To Update Decision Data
             </Button>
           )}
         </div>
