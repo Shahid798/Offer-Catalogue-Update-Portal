@@ -559,6 +559,9 @@ export default function AddRowForm() {
               const isDateField = header === 'StartDate' || header === 'EndDate';
               const isDisabledByIsPropositionActive = isDateField && isPropositionActiveValue === 'Always';
               const isMandatoryField = header === 'pyName' || header === 'OfferName';
+              const isPyIsPropositionActiveHeader = header === 'pyIsPropositionActive';
+              const isPyIsPropositionActiveDisabledByDates =
+                isPyIsPropositionActiveHeader && willAutoSetPyIsPropositionActiveToDate;
 
               return (
                 <div key={columnIndex} className="space-y-3">
@@ -572,6 +575,11 @@ export default function AddRowForm() {
                         Disabled (pyIsPropositionActive is Always)
                       </Badge>
                     )}
+                    {isPyIsPropositionActiveDisabledByDates && (
+                      <Badge variant="outline" className="text-xs">
+                        Auto-set to &quot;Date&quot; (based on StartDate and EndDate)
+                      </Badge>
+                    )}
                   </div>
                   
                   {/* Mode Selection */}
@@ -580,7 +588,11 @@ export default function AddRowForm() {
                       variant={currentField?.mode === 'existing' ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => handleModeChange(header, 'existing')}
-                      disabled={uniqueValues.length === 0 || isDisabledByIsPropositionActive}
+                      disabled={
+                        uniqueValues.length === 0 ||
+                        isDisabledByIsPropositionActive ||
+                        isPyIsPropositionActiveDisabledByDates
+                      }
                     >
                       Select Value
                     </Button>
@@ -588,7 +600,7 @@ export default function AddRowForm() {
                       variant={currentField?.mode === 'custom' ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => handleModeChange(header, 'custom')}
-                      disabled={isDisabledByIsPropositionActive}
+                      disabled={isDisabledByIsPropositionActive || isPyIsPropositionActiveDisabledByDates}
                     >
                       Custom Value
                     </Button>
@@ -596,7 +608,7 @@ export default function AddRowForm() {
                       variant={currentField?.mode === 'empty' ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => handleModeChange(header, 'empty')}
-                      disabled={isDisabledByIsPropositionActive}
+                      disabled={isDisabledByIsPropositionActive || isPyIsPropositionActiveDisabledByDates}
                     >
                       Empty
                     </Button>
@@ -604,7 +616,7 @@ export default function AddRowForm() {
                       variant={currentField?.mode === 'auto' ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => handleModeChange(header, 'auto')}
-                      disabled={isDisabledByIsPropositionActive}
+                      disabled={isDisabledByIsPropositionActive || isPyIsPropositionActiveDisabledByDates}
                     >
                       <Sparkles className="w-4 h-4 mr-1" />
                       Auto
@@ -616,7 +628,7 @@ export default function AddRowForm() {
                     <Select
                       value={currentField.value}
                       onValueChange={(value) => handleValueChange(header, value)}
-                      disabled={isDisabledByIsPropositionActive}
+                      disabled={isDisabledByIsPropositionActive || isPyIsPropositionActiveDisabledByDates}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select a value..." />
@@ -636,7 +648,7 @@ export default function AddRowForm() {
                       placeholder="Enter custom value..."
                       value={currentField.value}
                       onChange={(e) => handleValueChange(header, e.target.value)}
-                      disabled={isDisabledByIsPropositionActive}
+                      disabled={isDisabledByIsPropositionActive || isPyIsPropositionActiveDisabledByDates}
                     />
                   )}
 

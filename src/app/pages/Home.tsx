@@ -146,7 +146,7 @@ export default function Home() {
                 <Upload className="w-12 h-12 text-primary" />
               </div>
               <div className="space-y-2">
-                <h3>Drag and drop files or folders here</h3>
+                <h3>Drag and drop files or folders here. For multiple files, select a folder. For single file, select a file.</h3>
                 <p className="text-muted-foreground text-sm">
                   or choose from your device
                 </p>
@@ -157,7 +157,7 @@ export default function Home() {
                   variant="default"
                 >
                   <File className="w-4 h-4 mr-2" />
-                  Select Files
+                  Select A File
                 </Button>
                 <Button
                   onClick={() => folderInputRef.current?.click()}
