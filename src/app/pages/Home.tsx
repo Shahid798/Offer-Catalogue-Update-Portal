@@ -218,7 +218,7 @@ export default function Home() {
           {/* Submit button */}
           {uploadedFiles.length > 0 && (
             <Button className="w-full" size="lg" onClick={handleUpdateData}>
-              Update Decision Data
+              Proceed To Update Decision Data
             </Button>
           )}
         </div>
