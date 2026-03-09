@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { ArrowLeft, Save, Sparkles, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Save, Sparkles, AlertCircle, Info } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { Label } from '../components/ui/label';
@@ -33,6 +33,10 @@ function normalizeDateString(value: string): string {
   
   const trimmed = value.trim();
   if (!trimmed) return value;
+
+  // If the value includes a time component, ignore time and normalize using only the date portion.
+  // Examples: "2026-03-07T10:15:00Z" -> "2026-03-07", "03/07/2026 10:15" -> "03/07/2026"
+  const parseTarget = trimmed.split(/[T\s]/)[0] || trimmed;
   
   // Try to parse various date formats
   const datePatterns = [
@@ -47,7 +51,7 @@ function normalizeDateString(value: string): string {
   ];
   
   for (const pattern of datePatterns) {
-    const match = trimmed.match(pattern);
+    const match = parseTarget.match(pattern);
     if (match) {
       let year, month, day;
       
@@ -82,8 +86,8 @@ function normalizeDateString(value: string): string {
   }
   
   // Try parsing ISO date strings
-  const date = new Date(trimmed);
-  if (!isNaN(date.getTime()) && trimmed.includes('-') || trimmed.includes('/')) {
+  const date = new Date(parseTarget);
+  if (!isNaN(date.getTime()) && (parseTarget.includes('-') || parseTarget.includes('/'))) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
@@ -188,6 +192,20 @@ export default function AddRowForm() {
         if (!endDateValue || endDateValue.trim() === '') {
           errors.push('When pyIsPropositionActive is "Date", EndDate is required.');
         }
+      }
+    }
+
+    // StartDate/EndDate mutual requirement: both must be provided together (before saving).
+    if (startDateIndex !== -1 && endDateIndex !== -1) {
+      const startDateValue = currentValues['StartDate'] || '';
+      const endDateValue = currentValues['EndDate'] || '';
+      const hasStart = startDateValue.trim() !== '';
+      const hasEnd = endDateValue.trim() !== '';
+      if (hasStart && !hasEnd) {
+        errors.push('When StartDate is provided, EndDate must also be provided.');
+      }
+      if (hasEnd && !hasStart) {
+        errors.push('When EndDate is provided, StartDate must also be provided.');
       }
     }
 
@@ -463,6 +481,18 @@ export default function AddRowForm() {
       return normalizeDateString(value);
     });
 
+    // When both StartDate and EndDate are provided, set pyIsPropositionActive to "Date" in the saved row.
+    const pyIsPropositionActiveIndex = csvData.headers.findIndex(h => h === 'pyIsPropositionActive');
+    const startDateIndex = csvData.headers.findIndex(h => h === 'StartDate');
+    const endDateIndex = csvData.headers.findIndex(h => h === 'EndDate');
+    if (pyIsPropositionActiveIndex !== -1 && startDateIndex !== -1 && endDateIndex !== -1) {
+      const startVal = (newRow[startDateIndex] || '').trim();
+      const endVal = (newRow[endDateIndex] || '').trim();
+      if (startVal !== '' && endVal !== '') {
+        newRow[pyIsPropositionActiveIndex] = 'Date';
+      }
+    }
+
     // Update CSV data with new row
     const updatedData = {
       ...csvData,
@@ -481,6 +511,16 @@ export default function AddRowForm() {
       </div>
     );
   }
+
+  // Compute whether pyIsPropositionActive will be auto-set to "Date" when both dates are provided (for UI notice).
+  const startDateIndex = csvData.headers.findIndex(h => h === 'StartDate');
+  const endDateIndex = csvData.headers.findIndex(h => h === 'EndDate');
+  const pyIsPropositionActiveIndex = csvData.headers.findIndex(h => h === 'pyIsPropositionActive');
+  const startDateField = fieldValues['StartDate'];
+  const endDateField = fieldValues['EndDate'];
+  const resolvedStartDate = startDateField?.mode === 'auto' ? generateAutoValue(startDateIndex) : (startDateField?.value || '');
+  const resolvedEndDate = endDateField?.mode === 'auto' ? generateAutoValue(endDateIndex) : (endDateField?.value || '');
+  const willAutoSetPyIsPropositionActiveToDate = pyIsPropositionActiveIndex !== -1 && startDateIndex !== -1 && endDateIndex !== -1 && resolvedStartDate.trim() !== '' && resolvedEndDate.trim() !== '';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-12 px-4">
@@ -519,6 +559,9 @@ export default function AddRowForm() {
               const isDateField = header === 'StartDate' || header === 'EndDate';
               const isDisabledByIsPropositionActive = isDateField && isPropositionActiveValue === 'Always';
               const isMandatoryField = header === 'pyName' || header === 'OfferName';
+              const isPyIsPropositionActiveHeader = header === 'pyIsPropositionActive';
+              const isPyIsPropositionActiveDisabledByDates =
+                isPyIsPropositionActiveHeader && willAutoSetPyIsPropositionActiveToDate;
 
               return (
                 <div key={columnIndex} className="space-y-3">
@@ -532,6 +575,11 @@ export default function AddRowForm() {
                         Disabled (pyIsPropositionActive is Always)
                       </Badge>
                     )}
+                    {isPyIsPropositionActiveDisabledByDates && (
+                      <Badge variant="outline" className="text-xs">
+                        Auto-set to &quot;Date&quot; (based on StartDate and EndDate)
+                      </Badge>
+                    )}
                   </div>
                   
                   {/* Mode Selection */}
@@ -540,7 +588,11 @@ export default function AddRowForm() {
                       variant={currentField?.mode === 'existing' ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => handleModeChange(header, 'existing')}
-                      disabled={uniqueValues.length === 0 || isDisabledByIsPropositionActive}
+                      disabled={
+                        uniqueValues.length === 0 ||
+                        isDisabledByIsPropositionActive ||
+                        isPyIsPropositionActiveDisabledByDates
+                      }
                     >
                       Select Value
                     </Button>
@@ -548,7 +600,7 @@ export default function AddRowForm() {
                       variant={currentField?.mode === 'custom' ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => handleModeChange(header, 'custom')}
-                      disabled={isDisabledByIsPropositionActive}
+                      disabled={isDisabledByIsPropositionActive || isPyIsPropositionActiveDisabledByDates}
                     >
                       Custom Value
                     </Button>
@@ -556,7 +608,7 @@ export default function AddRowForm() {
                       variant={currentField?.mode === 'empty' ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => handleModeChange(header, 'empty')}
-                      disabled={isDisabledByIsPropositionActive}
+                      disabled={isDisabledByIsPropositionActive || isPyIsPropositionActiveDisabledByDates}
                     >
                       Empty
                     </Button>
@@ -564,7 +616,7 @@ export default function AddRowForm() {
                       variant={currentField?.mode === 'auto' ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => handleModeChange(header, 'auto')}
-                      disabled={isDisabledByIsPropositionActive}
+                      disabled={isDisabledByIsPropositionActive || isPyIsPropositionActiveDisabledByDates}
                     >
                       <Sparkles className="w-4 h-4 mr-1" />
                       Auto
@@ -576,7 +628,7 @@ export default function AddRowForm() {
                     <Select
                       value={currentField.value}
                       onValueChange={(value) => handleValueChange(header, value)}
-                      disabled={isDisabledByIsPropositionActive}
+                      disabled={isDisabledByIsPropositionActive || isPyIsPropositionActiveDisabledByDates}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select a value..." />
@@ -596,7 +648,7 @@ export default function AddRowForm() {
                       placeholder="Enter custom value..."
                       value={currentField.value}
                       onChange={(e) => handleValueChange(header, e.target.value)}
-                      disabled={isDisabledByIsPropositionActive}
+                      disabled={isDisabledByIsPropositionActive || isPyIsPropositionActiveDisabledByDates}
                     />
                   )}
 
@@ -646,6 +698,16 @@ export default function AddRowForm() {
                   <li key={index}>{error}</li>
                 ))}
               </ul>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Info: pyIsPropositionActive will be auto-set to "Date" when both dates are provided */}
+        {willAutoSetPyIsPropositionActiveToDate && (
+          <Alert className="mb-4 border-primary/50 bg-primary/5">
+            <Info className="h-4 w-4 text-primary" />
+            <AlertDescription>
+              <strong>Auto-setting:</strong> Because both StartDate and EndDate are provided, <strong>pyIsPropositionActive</strong> will be automatically set to &quot;Date&quot; when you save.
             </AlertDescription>
           </Alert>
         )}
