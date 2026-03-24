@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { ArrowLeft, Save, Sparkles, AlertCircle, Info } from 'lucide-react';
 import { Button } from '../components/ui/button';
@@ -16,6 +16,8 @@ import { Badge } from '../components/ui/badge';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { useCSV } from '../context/CSVContext';
 import { toast } from 'sonner';
+import { getCsvDisplayName } from '../utils/csvName';
+import { parseCsvFile } from '../utils/csvParse';
 
 interface CSVData {
   headers: string[];
@@ -30,14 +32,14 @@ interface FieldValue {
 // Utility function to detect and normalize dates to YYYY-MM-DD format
 function normalizeDateString(value: string): string {
   if (!value || typeof value !== 'string') return value;
-  
+
   const trimmed = value.trim();
   if (!trimmed) return value;
 
   // If the value includes a time component, ignore time and normalize using only the date portion.
   // Examples: "2026-03-07T10:15:00Z" -> "2026-03-07", "03/07/2026 10:15" -> "03/07/2026"
   const parseTarget = trimmed.split(/[T\s]/)[0] || trimmed;
-  
+
   // Try to parse various date formats
   const datePatterns = [
     // MM/DD/YYYY or M/D/YYYY
@@ -49,12 +51,12 @@ function normalizeDateString(value: string): string {
     // DD.MM.YYYY
     /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/,
   ];
-  
+
   for (const pattern of datePatterns) {
     const match = parseTarget.match(pattern);
     if (match) {
       let year, month, day;
-      
+
       // Check if it's already in YYYY-MM-DD format
       if (pattern.source.startsWith('^\\(\\\\d\\{4\\}')) {
         year = match[1];
@@ -74,36 +76,67 @@ function normalizeDateString(value: string): string {
           year = match[3];
         }
       }
-      
+
       // Validate the date
       const monthNum = parseInt(month);
       const dayNum = parseInt(day);
-      
+
       if (monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) {
         return `${year}-${month}-${day}`;
       }
     }
   }
-  
+
   // Try parsing ISO date strings
   const date = new Date(parseTarget);
   if (!isNaN(date.getTime()) && (parseTarget.includes('-') || parseTarget.includes('/'))) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
-    
+
     // Only return if it looks like a valid date (year is reasonable)
     if (year >= 1900 && year <= 2100) {
       return `${year}-${month}-${day}`;
     }
   }
-  
+
   return value;
 }
 
 export default function AddRowForm() {
   const navigate = useNavigate();
-  const { csvData, setCsvData } = useCSV();
+  const {
+    csvData,
+    setCsvData,
+    selectedFileName,
+    setSelectedFileName,
+    workflowMode,
+    folderFiles,
+    workflowStep,
+    setWorkflowStep,
+    selectedChannels,
+    currentChannelIndex,
+    setCurrentChannelIndex,
+    lastAddedOfferPyName,
+    setLastAddedOfferPyName,
+    multiCsvUpdates,
+    setMultiCsvUpdates,
+    addRowDefaults,
+    setAddRowDefaults,
+    selectedOfferVariants,
+    setSelectedOfferVariants,
+    currentOfferVariantIndex,
+    setCurrentOfferVariantIndex,
+    selectedTreatmentVariants,
+    setSelectedTreatmentVariants,
+    createdChannelOfferPyNames,
+    setCreatedChannelOfferPyNames,
+    treatmentCombos,
+    setTreatmentCombos,
+    currentTreatmentComboIndex,
+    setCurrentTreatmentComboIndex,
+    setAddedRowsTracker
+  } = useCSV();
   const [fieldValues, setFieldValues] = useState<Record<string, FieldValue>>({});
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
@@ -112,17 +145,23 @@ export default function AddRowForm() {
       // Initialize field values with smart defaults
       const initialValues: Record<string, FieldValue> = {};
       csvData.headers.forEach((header, columnIndex) => {
+        // Folder workflow derived rows (channel-offer) can provide fixed defaults.
+        if (workflowMode === 'folder' && addRowDefaults && Object.prototype.hasOwnProperty.call(addRowDefaults, header)) {
+          initialValues[header] = { mode: 'custom', value: addRowDefaults[header] };
+          return;
+        }
+
         // Check if column has same constant value for all rows
         const hasConstantValue = isColumnConstant(columnIndex);
-        
-        initialValues[header] = { 
-          mode: hasConstantValue ? 'auto' : 'empty', 
-          value: '' 
+
+        initialValues[header] = {
+          mode: hasConstantValue ? 'auto' : 'empty',
+          value: ''
         };
       });
       setFieldValues(initialValues);
     }
-  }, [csvData]);
+  }, [csvData, workflowMode, addRowDefaults]);
 
   // Validate and update errors whenever field values change
   useEffect(() => {
@@ -214,7 +253,7 @@ export default function AddRowForm() {
 
   const isColumnAlwaysPopulated = (columnIndex: number): boolean => {
     if (!csvData) return false;
-    
+
     // Check if all rows have a non-empty value in this column
     return csvData.rows.every(row => {
       const value = row[columnIndex];
@@ -224,11 +263,11 @@ export default function AddRowForm() {
 
   const isColumnConstant = (columnIndex: number): boolean => {
     if (!csvData || csvData.rows.length === 0) return false;
-    
+
     // Check if all rows have the same value in this column
     const firstValue = csvData.rows[0][columnIndex];
     if (!firstValue || firstValue.trim() === '') return false;
-    
+
     return csvData.rows.every(row => row[columnIndex] === firstValue);
   };
 
@@ -246,34 +285,34 @@ export default function AddRowForm() {
 
     const column = csvData.headers[columnIndex];
     const firstRowValue = csvData.rows[0][columnIndex];
-    
+
     if (!firstRowValue || firstRowValue.trim() === '') return { isPattern: false };
 
     // Try to find which columns contribute to this value and the separator
     // Test different separators
     const separators = ['', '_', '-', ' ', '.', '/', ':', '|'];
-    
+
     for (const separator of separators) {
       // Try different combinations of source columns
       const possibleCombinations = findColumnCombinations(columnIndex, separator);
-      
+
       for (const combination of possibleCombinations) {
         // Verify this pattern works across all rows
         const isConsistent = csvData.rows.every(row => {
           const targetValue = row[columnIndex];
           if (!targetValue) return false;
-          
+
           const constructedValue = combination.columns
             .map(idx => row[idx])
             .filter(val => val && val.trim() !== '')
             .join(separator);
-          
+
           return targetValue === constructedValue;
         });
-        
+
         if (isConsistent) {
-          return { 
-            isPattern: true, 
+          return {
+            isPattern: true,
             sourceColumns: combination.columns,
             separator: separator
           };
@@ -287,54 +326,54 @@ export default function AddRowForm() {
   // Helper function to find possible column combinations that might form the target
   const findColumnCombinations = (targetColumnIndex: number, separator: string): Array<{ columns: number[] }> => {
     if (!csvData) return [];
-    
+
     const firstRowValue = csvData.rows[0][targetColumnIndex];
     const combinations: Array<{ columns: number[] }> = [];
-    
+
     // Find columns whose values appear in the first row's target value
     const candidateColumns: number[] = [];
     for (let i = 0; i < csvData.headers.length; i++) {
       if (i === targetColumnIndex) continue;
-      
+
       const columnValue = csvData.rows[0][i];
       if (columnValue && columnValue.trim() !== '' && firstRowValue.includes(columnValue)) {
         candidateColumns.push(i);
       }
     }
-    
+
     if (candidateColumns.length === 0) return [];
-    
+
     // Try combinations of these columns
     // Start with all candidates in order they appear
     combinations.push({ columns: candidateColumns });
-    
+
     // Try pairs
     for (let i = 0; i < candidateColumns.length; i++) {
       for (let j = i + 1; j < candidateColumns.length; j++) {
         combinations.push({ columns: [candidateColumns[i], candidateColumns[j]] });
       }
     }
-    
+
     // Try individual columns
     candidateColumns.forEach(col => {
       combinations.push({ columns: [col] });
     });
-    
+
     return combinations;
   };
 
   const generateAutoValue = (columnIndex: number, visited: Set<number> = new Set()): string => {
     if (!csvData) return '';
-    
+
     // Prevent infinite recursion
     if (visited.has(columnIndex)) {
       return '';
     }
-    
+
     visited.add(columnIndex);
 
     const header = csvData.headers[columnIndex];
-    
+
     // Special case: if this is pyLabel and pyName has a custom/existing value, use it
     if (header === 'pyLabel') {
       const pyNameIndex = csvData.headers.findIndex(h => h === 'pyName');
@@ -352,17 +391,17 @@ export default function AddRowForm() {
         }
       }
     }
-    
+
     const pattern = analyzePattern(columnIndex);
 
     if (pattern.isPattern && pattern.sourceColumns) {
       // Build value from source columns using the detected separator
       const values: string[] = [];
-      
+
       pattern.sourceColumns.forEach(srcIdx => {
         const srcHeader = csvData.headers[srcIdx];
         const srcField = fieldValues[srcHeader];
-        
+
         if (srcField) {
           let value = '';
           if (srcField.mode === 'auto') {
@@ -370,7 +409,7 @@ export default function AddRowForm() {
           } else if (srcField.mode === 'existing' || srcField.mode === 'custom') {
             value = srcField.value;
           }
-          
+
           if (value && !value.startsWith('[Auto:')) {
             values.push(value);
           }
@@ -392,7 +431,7 @@ export default function AddRowForm() {
     // Check if this column matches another column (like pyName === pyLabel)
     for (let i = 0; i < csvData.headers.length; i++) {
       if (i === columnIndex) continue;
-      
+
       const allMatch = csvData.rows.every(row => row[i] === row[columnIndex]);
       if (allMatch) {
         const otherHeader = csvData.headers[i];
@@ -441,7 +480,7 @@ export default function AddRowForm() {
         if (csvData) {
           const startDateIndex = csvData.headers.findIndex(h => h === 'StartDate');
           const endDateIndex = csvData.headers.findIndex(h => h === 'EndDate');
-          
+
           if (startDateIndex !== -1 && prev['StartDate']) {
             updated['StartDate'] = { mode: 'empty', value: '' };
           }
@@ -455,7 +494,7 @@ export default function AddRowForm() {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!csvData) return;
 
     // Check for validation errors
@@ -467,7 +506,7 @@ export default function AddRowForm() {
     // Build new row array in the same order as headers
     const newRow: string[] = csvData.headers.map((header, columnIndex) => {
       const field = fieldValues[header];
-      
+
       let value = '';
       if (field.mode === 'auto') {
         value = generateAutoValue(columnIndex);
@@ -476,7 +515,7 @@ export default function AddRowForm() {
       } else {
         value = field.value;
       }
-      
+
       // Apply date normalization to the value
       return normalizeDateString(value);
     });
@@ -500,6 +539,305 @@ export default function AddRowForm() {
     };
 
     setCsvData(updatedData);
+
+    // Store in-memory updates so switching between multiple channel CSVs doesn't lose changes.
+    if (workflowMode === 'folder' && selectedFileName) {
+      setMultiCsvUpdates({
+        ...multiCsvUpdates,
+        [selectedFileName]: updatedData,
+      });
+
+      const pyNameIndex = csvData.headers.findIndex(h => h === 'pyName');
+      const rowPyName = pyNameIndex !== -1 ? newRow[pyNameIndex] : 'Unknown';
+      setAddedRowsTracker(prev => ({
+        ...prev,
+        [selectedFileName]: [...(prev[selectedFileName] || []), rowPyName]
+      }));
+    }
+
+    // Multi-file workflow (folder): step-by-step navigation.
+    if (workflowMode === 'folder') {
+      // Step: Offer
+      if (workflowStep === 'offer') {
+        toast.success('Offer added successfully');
+
+        // Capture Offer pyName for downstream channel mapping.
+        const pyNameIndexInOfferCsv = csvData.headers.findIndex(h => h === 'pyName');
+        const newlyAddedOfferPyName = pyNameIndexInOfferCsv !== -1 ? newRow[pyNameIndexInOfferCsv] : null;
+        setLastAddedOfferPyName(newlyAddedOfferPyName);
+
+        // If OfferVariations CSV exists, go to OfferVariations step; otherwise go to Channels step.
+        const offerVariationsFile = folderFiles.find(file => {
+          const normalizedFileName = file.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          return normalizedFileName.includes('offervariations') && !normalizedFileName.includes('offertooffervariations');
+        });
+
+        if (offerVariationsFile) {
+          const offerVariationsFileName = offerVariationsFile.name;
+          setWorkflowStep('offer-variations');
+          setAddRowDefaults({});
+
+          if (multiCsvUpdates[offerVariationsFileName]) {
+            setCsvData(multiCsvUpdates[offerVariationsFileName]);
+            setSelectedFileName(offerVariationsFileName);
+          } else {
+            const parsed = await parseCsvFile(offerVariationsFile);
+            setCsvData(parsed);
+            setSelectedFileName(offerVariationsFileName);
+          }
+
+          // Go to Variant Selection UI instead of generic add row
+          navigate('/offer-variations');
+          return;
+        }
+
+        // No OfferVariations CSV -> proceed to OfferToOfferVariations loop using default variant
+        toast.info("OfferVariations file not found. Default OfferVariantDefault will be used.");
+
+        const offerToVariationsFile = folderFiles.find(file => {
+          const normalizedFileName = file.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          return normalizedFileName.includes('offertooffervariations');
+        });
+
+        if (offerToVariationsFile) {
+          const fileName = offerToVariationsFile.name;
+          const defaultVariant = "OfferVariantDefault";
+          setSelectedOfferVariants([defaultVariant]);
+          setCurrentOfferVariantIndex(0);
+          setWorkflowStep("offerto-offervariations");
+
+          if (multiCsvUpdates[fileName]) {
+            setCsvData(multiCsvUpdates[fileName]);
+            setSelectedFileName(fileName);
+          } else {
+            const parsed = await parseCsvFile(offerToVariationsFile);
+            setCsvData(parsed);
+            setSelectedFileName(fileName);
+          }
+
+          setAddRowDefaults({
+            pyName: `${newlyAddedOfferPyName}-${defaultVariant}`,
+            pyLabel: `${newlyAddedOfferPyName}-${defaultVariant}`,
+            OfferName: newlyAddedOfferPyName || '',
+            OfferVariant: defaultVariant
+          });
+
+          return;
+        }
+
+        // Fallback to channels if OfferToOfferVariations doesn't exist either
+        toast.info("OfferToOfferVariations file missing. Proceeding to Channels.");
+        setWorkflowStep('channels');
+        setAddRowDefaults({});
+        navigate('/channels');
+        return;
+      }
+
+      // Step: OfferVariations (skip handled via explicit Skip button)
+      // When saving a new variant from AddRowForm, navigate back to Variant Selection.
+      if (workflowStep === 'offer-variations') {
+        navigate('/offer-variations');
+        return;
+      }
+
+      // Step: OfferToOfferVariations loop
+      if (workflowStep === 'offerto-offervariations') {
+        toast.success('OfferToOfferVariations row added successfully');
+        const nextIndex = currentOfferVariantIndex + 1;
+
+        if (nextIndex < selectedOfferVariants.length) {
+          setCurrentOfferVariantIndex(nextIndex);
+          const nextVariant = selectedOfferVariants[nextIndex];
+          setAddRowDefaults({
+            pyName: `${lastAddedOfferPyName}-${nextVariant}`,
+            pyLabel: `${lastAddedOfferPyName}-${nextVariant}`,
+            OfferName: lastAddedOfferPyName || '',
+            OfferVariant: nextVariant
+          });
+          return;
+        }
+
+        // Loop finished, continue to channels
+        setWorkflowStep("channels");
+        setAddRowDefaults({});
+        navigate("/channels");
+        return;
+      }
+
+      // Step: Channel offer (process selected channels sequentially)
+      if (workflowStep === 'channel-offer') {
+        const pyNameIndex = csvData.headers.findIndex(h => h === 'pyName');
+        const channelOfferPyName = pyNameIndex !== -1 ? newRow[pyNameIndex] : null;
+
+        if (channelOfferPyName) {
+           setCreatedChannelOfferPyNames(prev => [...prev, channelOfferPyName]);
+        }
+
+        const nextIndex = currentChannelIndex + 1;
+        if (nextIndex < selectedChannels.length) {
+          const nextChannel = selectedChannels[nextIndex];
+          const nextChannelFile = folderFiles.find(file => {
+            const normalizedFileName = file.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const normalizedKeyword = String(nextChannel).toLowerCase().replace(/[^a-z0-9]/g, '');
+            return normalizedFileName.includes(normalizedKeyword);
+          });
+
+          if (!nextChannelFile) {
+            toast.error(`Channel CSV not found for ${nextChannel}.`);
+            return;
+          }
+
+          setCurrentChannelIndex(nextIndex);
+          setWorkflowStep('channel-offer');
+
+          const nextChannelFileName = nextChannelFile.name;
+          if (multiCsvUpdates[nextChannelFileName]) {
+            setCsvData(multiCsvUpdates[nextChannelFileName]);
+            setSelectedFileName(nextChannelFileName);
+          } else {
+            const parsed = await parseCsvFile(nextChannelFile);
+            setCsvData(parsed);
+            setSelectedFileName(nextChannelFileName);
+          }
+
+          if (!lastAddedOfferPyName) {
+            toast.error('Offer pyName is missing. Cannot build channel defaults.');
+            return;
+          }
+
+          const offerName = lastAddedOfferPyName;
+          const pyName = `${offerName}_${nextChannel}`;
+          setAddRowDefaults({
+            OfferName: offerName,
+            pyName,
+            pyLabel: pyName,
+            ShortDescription: pyName,
+          });
+
+          navigate('/add-row');
+          return;
+        }
+
+        // All selected channels processed -> proceed to TreatmentVariations step
+        const allChannels = channelOfferPyName ? [...createdChannelOfferPyNames, channelOfferPyName] : createdChannelOfferPyNames;
+
+        const tvFile = folderFiles.find(file => {
+          const normalized = file.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          return normalized.includes('treatmentvariations') && !normalized.includes('treatmenttotreatmentvariations');
+        });
+
+        if (tvFile) {
+          const fileName = tvFile.name;
+          setWorkflowStep('treatment-variations');
+          setAddRowDefaults({});
+          if (multiCsvUpdates[fileName]) {
+            setCsvData(multiCsvUpdates[fileName]);
+            setSelectedFileName(fileName);
+          } else {
+            const parsed = await parseCsvFile(tvFile);
+            setCsvData(parsed);
+            setSelectedFileName(fileName);
+          }
+          navigate('/treatment-variations');
+          return;
+        }
+
+        // TreatmentVariations CSV missing -> Fallback
+        toast.info("TreatmentVariations CSV not found. Defaulting to TreatmentVariantDefault.");
+        setSelectedTreatmentVariants(["TreatmentVariantDefault"]);
+
+        const combos = [];
+        for (const ch of allChannels) {
+           for (const tv of ["TreatmentVariantDefault"]) {
+              for (const ov of selectedOfferVariants) {
+                 combos.push({ treatmentName: ch, treatmentVariant: tv, offerVariant: ov });
+              }
+           }
+        }
+        setTreatmentCombos(combos);
+        if (combos.length === 0) {
+           toast.error("No valid combinations for TreatmentToTreatmentVariations.");
+           setWorkflowStep('offer');
+           setAddRowDefaults({});
+           navigate('/offer-workflow');
+           return;
+        }
+
+        const t2tFile = folderFiles.find(file => {
+          const normalized = file.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          return normalized.includes('treatmenttotreatmentvariations');
+        });
+
+        if (t2tFile) {
+          const fileName = t2tFile.name;
+          setCurrentTreatmentComboIndex(0);
+          setWorkflowStep('treatmentto-treatmentvariations');
+          if (multiCsvUpdates[fileName]) {
+            setCsvData(multiCsvUpdates[fileName]);
+            setSelectedFileName(fileName);
+          } else {
+            const parsed = await parseCsvFile(t2tFile);
+            setCsvData(parsed);
+            setSelectedFileName(fileName);
+          }
+          
+          const firstCombo = combos[0];
+          setAddRowDefaults({
+            pyName: `${firstCombo.treatmentName}-${firstCombo.treatmentVariant}-${firstCombo.offerVariant}`,
+            pyLabel: `${firstCombo.treatmentName}-${firstCombo.treatmentVariant}-${firstCombo.offerVariant}`,
+            OfferName: lastAddedOfferPyName || '',
+            OfferVariant: firstCombo.offerVariant,
+            TreatmentName: firstCombo.treatmentName,
+            TreatmentVariant: firstCombo.treatmentVariant
+          });
+          return; // Stay on add-row
+        }
+        
+        toast.info("TreatmentToTreatmentVariations CSV missing. Process complete.");
+        setWorkflowStep('offer');
+        setAddRowDefaults({});
+        navigate('/review-dashboard');
+        return;
+      }
+
+      // Step: TreatmentVariations (When saving a new variant from AddRowForm)
+      if (workflowStep === 'treatment-variations') {
+        navigate('/treatment-variations');
+        return;
+      }
+
+      // Step: TreatmentToTreatmentVariations loop
+      if (workflowStep === 'treatmentto-treatmentvariations') {
+        toast.success('TreatmentToTreatmentVariations row added successfully');
+        const nextIndex = currentTreatmentComboIndex + 1;
+        
+        if (nextIndex < treatmentCombos.length) {
+          setCurrentTreatmentComboIndex(nextIndex);
+          const nextCombo = treatmentCombos[nextIndex];
+          setAddRowDefaults({
+            pyName: `${nextCombo.treatmentName}-${nextCombo.treatmentVariant}-${nextCombo.offerVariant}`,
+            pyLabel: `${nextCombo.treatmentName}-${nextCombo.treatmentVariant}-${nextCombo.offerVariant}`,
+            OfferName: lastAddedOfferPyName || '',
+            OfferVariant: nextCombo.offerVariant,
+            TreatmentName: nextCombo.treatmentName,
+            TreatmentVariant: nextCombo.treatmentVariant
+          });
+          return;
+        }
+
+        toast.success("All Treatment configurations completed!");
+        setWorkflowStep('offer');
+        setAddRowDefaults({});
+        navigate('/review-dashboard');
+        return;
+      }
+
+      // Safety: never fall back to single-file routing while in folder workflow.
+      toast.error('Unsupported folder workflow step.');
+      return;
+    }
+
+    // Single-file workflow remains unchanged.
     toast.success('New row added successfully!');
     navigate('/csv-editor');
   };
@@ -526,36 +864,55 @@ export default function AddRowForm() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-12 px-4">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <Button
-          variant="ghost"
-          onClick={() => navigate(-1)}
-          className="mb-6"
-        >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to CSV Editor
-        </Button>
+        {workflowMode !== 'folder' && (
+          <Button
+            variant="ghost"
+            onClick={() => navigate(-1)}
+            className="mb-6"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to CSV Editor
+          </Button>
+        )}
 
-        <div className="mb-8">
-          <h1 className="mb-2">Add New Row</h1>
+        <div className="mb-6">
+          <h1 className="mb-2">
+            {workflowMode === 'folder'
+              ? (workflowStep === 'offerto-offervariations' || workflowStep === 'treatmentto-treatmentvariations'
+                ? `System - ${getCsvDisplayName(selectedFileName) || selectedFileName}`
+                : getCsvDisplayName(selectedFileName) || 'Offer')
+              : 'Add New Row'}
+          </h1>
+          {workflowMode === 'folder' && workflowStep === 'offerto-offervariations' && (
+            <p className="font-semibold text-primary bg-primary/10 inline-block px-3 py-1 rounded-md mb-2">
+              Offer: {lastAddedOfferPyName} | OfferVariant: {selectedOfferVariants[currentOfferVariantIndex]}
+            </p>
+          )}
+          {workflowMode === 'folder' && workflowStep === 'treatmentto-treatmentvariations' && (
+            <p className="font-semibold text-primary bg-primary/10 inline-block px-3 py-1 rounded-md mb-2">
+              Treatment: {treatmentCombos[currentTreatmentComboIndex]?.treatmentName} | TreatmentVariant: {treatmentCombos[currentTreatmentComboIndex]?.treatmentVariant} | OfferVariant: {treatmentCombos[currentTreatmentComboIndex]?.offerVariant}
+            </p>
+          )}
           <p className="text-muted-foreground">
-            Configure values for each column. Select from existing values, enter custom data, 
+            Configure values for each column. Select from existing values, enter custom data,
             leave empty, or let the system auto-generate.
           </p>
         </div>
 
         {/* Form */}
         <Card className="p-6 mb-6">
-          <div className="space-y-6">
+          {/* Folder workflow: keep the configuration area compact with internal scroll */}
+          <div className={workflowMode === 'folder' ? 'max-h-[60vh] overflow-y-auto pr-2 space-y-4' : 'max-h-[60vh] overflow-y-auto pr-2 space-y-6'}>
             {csvData.headers.map((header, columnIndex) => {
               const uniqueValues = getUniqueValuesForColumn(columnIndex);
               const currentField = fieldValues[header];
 
               // Check if this is StartDate or EndDate and if they should be disabled
               const isPropositionActiveField = fieldValues['pyIsPropositionActive'];
-              const isPropositionActiveValue = isPropositionActiveField?.mode === 'auto' 
+              const isPropositionActiveValue = isPropositionActiveField?.mode === 'auto'
                 ? generateAutoValue(csvData.headers.findIndex(h => h === 'pyIsPropositionActive'))
                 : isPropositionActiveField?.value || '';
-              
+
               const isDateField = header === 'StartDate' || header === 'EndDate';
               const isDisabledByIsPropositionActive = isDateField && isPropositionActiveValue === 'Always';
               const isMandatoryField = header === 'pyName' || header === 'OfferName';
@@ -564,7 +921,7 @@ export default function AddRowForm() {
                 isPyIsPropositionActiveHeader && willAutoSetPyIsPropositionActiveToDate;
 
               return (
-                <div key={columnIndex} className="space-y-3">
+                <div key={columnIndex} className={workflowMode === 'folder' ? 'space-y-2' : 'space-y-3'}>
                   <div className="flex items-center justify-between">
                     <Label className="text-base">
                       {header}
@@ -581,9 +938,9 @@ export default function AddRowForm() {
                       </Badge>
                     )}
                   </div>
-                  
+
                   {/* Mode Selection */}
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className={workflowMode === 'folder' ? 'grid grid-cols-4 gap-1' : 'grid grid-cols-4 gap-2'}>
                     <Button
                       variant={currentField?.mode === 'existing' ? 'default' : 'outline'}
                       size="sm"
@@ -714,14 +1071,22 @@ export default function AddRowForm() {
 
         {/* Action buttons */}
         <div className="flex gap-4">
-          <Button
-            variant="outline"
-            size="lg"
-            onClick={() => navigate(-1)}
-            className="flex-1"
-          >
-            Cancel
-          </Button>
+          {!(workflowMode === 'folder' && workflowStep !== 'offer') && (
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={() => {
+                if (workflowMode === 'folder') {
+                  navigate('/offer-workflow'); // Always exit entire workflow
+                } else {
+                  navigate(-1);
+                }
+              }}
+              className="flex-1"
+            >
+              {workflowMode === 'folder' ? 'Back' : 'Cancel'}
+            </Button>
+          )}
           <Button
             size="lg"
             onClick={handleSave}

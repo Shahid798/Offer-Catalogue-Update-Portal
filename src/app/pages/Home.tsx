@@ -1,11 +1,22 @@
-import { useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { Upload, File, FolderOpen, X, CheckCircle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
+import { useCSV } from '../context/CSVContext';
 
 export default function Home() {
   const navigate = useNavigate();
+  const { 
+    setWorkflowMode, 
+    setFolderFiles,
+    setWorkflowStep,
+    setSelectedChannels,
+    setCurrentChannelIndex,
+    setLastAddedOfferPyName,
+    setMultiCsvUpdates,
+    setAddRowDefaults,
+  } = useCSV();
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -55,11 +66,31 @@ export default function Home() {
   };
 
   const handleUpdateData = () => {
-    // Find first CSV file
-    const csvFile = uploadedFiles.find(file => 
+    // Identify CSV files in the current selection
+    const csvFiles = uploadedFiles.filter(file =>
       file.name.toLowerCase().endsWith('.csv')
     );
-    
+
+    // When a folder upload yields multiple CSVs, go to the Offer Workflow
+    // screen instead of directly to the editor.
+    if (csvFiles.length > 1) {
+      navigate('/offer-workflow', { state: { files: uploadedFiles } });
+      return;
+    }
+
+    // Strict separation: reset multi-file (folder) workflow state before entering single-file workflow.
+    setWorkflowMode('single');
+    setFolderFiles([]);
+    setWorkflowStep('offer');
+    setSelectedChannels([]);
+    setCurrentChannelIndex(0);
+    setLastAddedOfferPyName(null);
+    setMultiCsvUpdates({});
+    setAddRowDefaults({});
+
+    // Existing single-file behavior (0 or 1 CSV) remains unchanged
+    const csvFile = csvFiles[0];
+
     if (csvFile) {
       // Parse CSV and navigate
       parseAndNavigate(csvFile);
