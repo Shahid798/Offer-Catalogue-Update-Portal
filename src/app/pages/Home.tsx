@@ -1,11 +1,22 @@
-import { useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { Upload, File, FolderOpen, X, CheckCircle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
+import { useCSV } from '../context/CSVContext';
 
 export default function Home() {
   const navigate = useNavigate();
+  const { 
+    setWorkflowMode, 
+    setFolderFiles,
+    setWorkflowStep,
+    setSelectedChannels,
+    setCurrentChannelIndex,
+    setLastAddedOfferPyName,
+    setMultiCsvUpdates,
+    setAddRowDefaults,
+  } = useCSV();
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -55,11 +66,31 @@ export default function Home() {
   };
 
   const handleUpdateData = () => {
-    // Find first CSV file
-    const csvFile = uploadedFiles.find(file => 
+    // Identify CSV files in the current selection
+    const csvFiles = uploadedFiles.filter(file =>
       file.name.toLowerCase().endsWith('.csv')
     );
-    
+
+    // When a folder upload yields multiple CSVs, go to the Offer Workflow
+    // screen instead of directly to the editor.
+    if (csvFiles.length > 1) {
+      navigate('/offer-workflow', { state: { files: uploadedFiles } });
+      return;
+    }
+
+    // Strict separation: reset multi-file (folder) workflow state before entering single-file workflow.
+    setWorkflowMode('single');
+    setFolderFiles([]);
+    setWorkflowStep('offer');
+    setSelectedChannels([]);
+    setCurrentChannelIndex(0);
+    setLastAddedOfferPyName(null);
+    setMultiCsvUpdates({});
+    setAddRowDefaults({});
+
+    // Existing single-file behavior (0 or 1 CSV) remains unchanged
+    const csvFile = csvFiles[0];
+
     if (csvFile) {
       // Parse CSV and navigate
       parseAndNavigate(csvFile);
@@ -176,7 +207,7 @@ export default function Home() {
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <CheckCircle className="w-5 h-5 text-green-600" />
-                  <h3>Uploaded Files ({uploadedFiles.length})</h3>
+                  <h3>Uploaded File(s) ({uploadedFiles.length})</h3>
                 </div>
                 <Button
                   variant="ghost"
@@ -218,7 +249,7 @@ export default function Home() {
           {/* Submit button */}
           {uploadedFiles.length > 0 && (
             <Button className="w-full" size="lg" onClick={handleUpdateData}>
-              Update Decision Data
+              Proceed To Update Decision Data
             </Button>
           )}
         </div>
